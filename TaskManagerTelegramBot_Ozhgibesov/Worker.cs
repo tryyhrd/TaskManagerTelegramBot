@@ -1,3 +1,4 @@
+using System.Net.Security;
 using TaskManagerTelegramBot_Ozhgibesov.Classes;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
@@ -26,11 +27,17 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-                await Task.Delay(1000, stoppingToken);
-            }
+            telegramBotClient = new TelegramBotClient(Token);
+            telegramBotClient.StartReceiving(
+                HandleUpdateAsync,
+                HandleErrorAsync,
+                null,
+                new CancellationTokenSource().Token
+                );
+
+            TimerCallback TimerCallback = new TimerCallback(Tick);
+
+            Timer = new Timer(TimerCallback, 0, 0, 60 * 1000);
         }
 
         List<string> Messages = new List<string>()
@@ -188,6 +195,24 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             CancellationToken cancellationToken)
         {
             Console.WriteLine("Ошибка: " + exception.Message);
+        }
+
+        public async void Tick(object obj)
+        {
+            string TimeNow = DateTime.Now.ToString("HH:mm dd.MM.yyyy");
+            foreach (Users User in Users)
+            {
+                for (int i=0; i < User.Events.Count; i++)
+                {
+                    if (User.Events[i].Time.ToString("HH:mm dd.MM.yyyy") != TimeNow) continue;
+
+                    await telegramBotClient.SendMessage(
+                        User.IdUser,
+                        "Напоминание: " + User.Events[i].Message);
+
+                    User.Events.Remove(User.Events[i]);
+                }
+            }
         }
     }
 }
