@@ -1,8 +1,20 @@
+using TaskManagerTelegramBot_Ozhgibesov.Classes;
+using Telegram.Bot;
+using Telegram.Bot.Types.ReplyMarkups;
+
 namespace TaskManagerTelegramBot_Ozhgibesov
 {
     public class Worker : BackgroundService
     {
-        private readonly ILogger<Worker> _logger;
+        readonly string Token = "полученный телеграмм токен";
+
+        TelegramBotClient telegramBotClient;
+
+        List<Users> Users = new List<Users>();
+
+        ILogger<Worker> _logger;
+
+        Timer Timer;
 
         public Worker(ILogger<Worker> logger)
         {
@@ -16,6 +28,43 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                 _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
                 await Task.Delay(1000, stoppingToken);
             }
+        }
+
+        List<string> Messages = new List<string>()
+        {
+            "Здравствуйте! " +
+            "\nРады приветствовать вас в Telegram-боте Напоминаторе",
+
+            "Укажите дату и время напоминания в следующем формате:" +
+            "\n<i><b>12:51 26.04.2025</b>" +
+            "\nНапомни о том что я хотел сходить в магазин.</i>",
+
+            "",
+            "Задачи пользователя не найдены.",
+            "Событие удалено.",
+            "Все события удалены."
+        };
+
+        public bool CheckFormatDateTime(string value, out DateTime time)
+        {
+            return DateTime.TryParse(value, out time);
+        }
+
+        public static ReplyKeyboardMarkup GetButtons()
+        {
+            List<KeyboardButton> keyboardButtons = new List<KeyboardButton>();
+            keyboardButtons.Add(new KeyboardButton("Удалить все задачи"));
+
+            return new ReplyKeyboardMarkup { Keyboard = new List<List<KeyboardButton>> { keyboardButtons } };
+        }
+
+        public static InlineKeyboardMarkup DeleteEvent(string Message)
+        {
+            List<InlineKeyboardButton> inlineKeyboards = new List<InlineKeyboardButton>();
+
+            inlineKeyboards.Add(new InlineKeyboardButton("Удалить", Message));
+
+            return new InlineKeyboardMarkup(inlineKeyboards);
         }
     }
 }
