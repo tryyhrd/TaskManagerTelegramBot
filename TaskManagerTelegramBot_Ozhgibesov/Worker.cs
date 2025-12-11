@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net.Security;
 using TaskManagerTelegramBot_Ozhgibesov.Classes;
 using Telegram.Bot;
@@ -10,7 +11,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 {
     public class Worker : BackgroundService
     {
-        readonly string Token = "полученный телеграмм токен";
+        readonly string Token = "8478761032:AAFvQ6jCTfbPbGIoLdXwi6KdJu47SRV-NL4";
 
         TelegramBotClient telegramBotClient;
 
@@ -68,18 +69,17 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             return new ReplyKeyboardMarkup { Keyboard = new List<List<KeyboardButton>> { keyboardButtons } };
         }
 
-        public static InlineKeyboardMarkup DeleteEvent(string Message)
+        public static InlineKeyboardMarkup DeleteEvent(string eventId)
         {
-            List<InlineKeyboardButton> inlineKeyboards = new List<InlineKeyboardButton>();
-
-            inlineKeyboards.Add(new InlineKeyboardButton("Удалить", Message));
-
-            return new InlineKeyboardMarkup(inlineKeyboards);
+            return new InlineKeyboardMarkup(new[]
+            {
+                new InlineKeyboardButton("Удалить", callbackDataOrUrl: eventId)
+            });
         }
 
         public async void SendMessage(long chatId, int typeMessage)
         {
-            if (typeMessage != 3)
+            if (typeMessage != 2)
             {
                 await telegramBotClient.SendMessage(
                     chatId,
@@ -87,7 +87,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                     ParseMode.Html,
                     replyMarkup: GetButtons());
             }
-            else if (typeMessage == 3)
+            else if (typeMessage == 2)
                 await telegramBotClient.SendMessage(
                     chatId,
                     $"Указанное вами время и дата не могут быть установлены," +
@@ -102,8 +102,8 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             {
                 Users User = Users.Find(x => x.IdUser == chatId);
 
-                if (User == null) SendMessage(chatId, 4);
-                else if (User.Events.Count == 0) SendMessage(chatId, 4);
+                if (User == null) SendMessage(chatId, 3);
+                else if (User.Events.Count == 0) SendMessage(chatId, 3);
                 else
                 {
                     foreach (Events Event in User.Events)
@@ -112,7 +112,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                             chatId,
                             $"Уведомить пользователя: {Event.Time.ToString("HH:mm dd:MM:yyyy")}" +
                             $"\nСообщение: {Event.Message}",
-                            replyMarkup: DeleteEvent(Event.Message)
+                            replyMarkup: DeleteEvent(Event.Id)
                             ); 
                     }
                 }
@@ -132,7 +132,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                 Users User = Users.Find(x => x.IdUser == message.Chat.Id);
 
                 if (User == null) SendMessage(message.Chat.Id, 4);
-                else if (User.Events.Count == 0) SendMessage(User.IdUser, 4);
+                else if (User.Events.Count == 0) SendMessage(User.IdUser, 3);
                 else
                 {
                     User.Events = new List<Events>();
@@ -179,12 +179,21 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
             else if (update.Type == UpdateType.CallbackQuery)
             {
-                CallbackQuery query = update.CallbackQuery;
-                Users User = Users.Find(x => x.IdUser == query.Message.Chat.Id);
-                Events Event = User.Events.Find(x => x.Message == query.Data);
-                User.Events.Remove(Event);
+                var query = update.CallbackQuery;
+                var userId = query.Message.Chat.Id;
+                var eventId = query.Data;
 
-                SendMessage(query.Message.Chat.Id, 5);
+                var User = Users.Find(x => x.IdUser == userId);
+
+                if (User != null)
+                {
+                    var eventToRemove = User.Events.Find(e => e.Id == eventId);
+                    if (eventToRemove != null)
+                    {
+                        User.Events.Remove(eventToRemove);
+                        await telegramBotClient.SendMessage(userId, "Событие удалено.");
+                    }
+                }
             }
         }
 
