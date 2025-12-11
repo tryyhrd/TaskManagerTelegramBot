@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Net.Security;
 using TaskManagerTelegramBot_Ozhgibesov.Classes;
@@ -15,8 +16,6 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
         TelegramBotClient telegramBotClient;
 
-        List<Users> Users = new List<Users>();
-
         ILogger<Worker> _logger;
 
         Timer Timer;
@@ -24,6 +23,11 @@ namespace TaskManagerTelegramBot_Ozhgibesov
         public Worker(ILogger<Worker> logger)
         {
             _logger = logger;
+
+            using (var db = new Classes.Common.Connect())
+            {
+                db.Database.EnsureCreated();
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -100,20 +104,25 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             else if (command.ToLower() == "/create_task") SendMessage(chatId, 1);
             else if (command.ToLower() == "/list_tasks")
             {
-                Users User = Users.Find(x => x.IdUser == chatId);
-
-                if (User == null) SendMessage(chatId, 3);
-                else if (User.Events.Count == 0) SendMessage(chatId, 3);
-                else
+                using (var db = new Classes.Common.Connect())
                 {
-                    foreach (Events Event in User.Events)
+                    Users User = db.Users
+                            .Include(u => u.Events)
+                            .FirstOrDefault(x => x.IdUser == chatId);
+
+                    if (User == null) SendMessage(chatId, 3);
+                    else if (User.Events.Count == 0) SendMessage(chatId, 3);
+                    else
                     {
-                        await telegramBotClient.SendMessage(
-                            chatId,
-                            $"Уведомить пользователя: {Event.Time.ToString("HH:mm dd:MM:yyyy")}" +
-                            $"\nСообщение: {Event.Message}",
-                            replyMarkup: DeleteEvent(Event.Id)
-                            ); 
+                        foreach (Events Event in User.Events)
+                        {
+                            await telegramBotClient.SendMessage(
+                                chatId,
+                                $"Уведомить пользователя: {Event.Time.ToString("HH:mm dd:MM:yyyy")}" +
+                                $"\nСообщение: {Event.Message}",
+                                replyMarkup: DeleteEvent(Event.Id)
+                                );
+                        }
                     }
                 }
             }
@@ -126,46 +135,68 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             long IdUser = message.Chat.Id;
             string MessageUser = message.Text;
 
+            Users User = null;
+
             if (message.Text.Contains("/")) Command(message.Chat.Id, message.Text);
+
             else if (message.Text.Equals("Удалить все задачи"))
             {
-                Users User = Users.Find(x => x.IdUser == message.Chat.Id);
-
-                if (User == null) SendMessage(message.Chat.Id, 4);
-                else if (User.Events.Count == 0) SendMessage(User.IdUser, 3);
-                else
+                using (var db = new Classes.Common.Connect())
                 {
-                    User.Events = new List<Events>();
-                    SendMessage(User.IdUser, 6);
-                }
+                    User = db.Users.FirstOrDefault(x => x.IdUser == IdUser);
+
+                    if (User == null) SendMessage(message.Chat.Id, 4);
+                    else if (User.Events.Count == 0) SendMessage(User.IdUser, 3);
+                    else
+                    {
+                        var userInDb = db.Users.Include(u => u.Events).First(u => u.IdUser == IdUser);
+                        db.Events.RemoveRange(userInDb.Events);
+                        db.SaveChanges();
+
+                        var userInMemory = db.Users.First(u => u.IdUser == IdUser);
+                        userInMemory.Events.Clear();
+
+                        SendMessage(User.IdUser, 5);
+                    }
+                }    
             }
             else
             {
-                Users User = Users.Find(x => x.IdUser == message.Chat.Id);
-                if (User == null)
+                using (var db = new Classes.Common.Connect())
                 {
-                    User = new Users(message.Chat.Id);
-                    Users.Add(User);
+                    var user = db.Users
+                        .Include(u => u.Events)
+                        .FirstOrDefault(u => u.IdUser == IdUser);
+
+                    if (user == null)
+                    {
+                        user = new Users(IdUser);
+                        db.Users.Add(user);
+                    }
+
+                    string[] info = message.Text.Split('\n');
+
+                    if (info.Length < 2)
+                    {
+                        SendMessage(message.Chat.Id, 2);
+                        return;
+                    }
+
+                    DateTime time;
+
+                    if (CheckFormatDateTime(info[0], out time) == false)
+                    {
+                        SendMessage(message.Chat.Id, 2);
+                        return;
+                    }
+
+                    if (time < DateTime.Now) SendMessage(message.Chat.Id, 3);
+
+                    var newEvent = new Events(time, message.Text.Replace("HH:mm dd.MM.yyyy" + "\n", ""));
+                    user.Events.Add(newEvent);
+
+                    db.SaveChanges(); 
                 }
-                string[] Info = message.Text.Split('\n');
-                if (Info.Length < 2)
-                {
-                    SendMessage(message.Chat.Id, 2);
-                    return;
-                }
-
-                DateTime Time;
-                if (CheckFormatDateTime(Info[0], out Time) == false)
-                {
-                    SendMessage(message.Chat.Id, 2);
-                    return;
-                } 
-
-                if (Time < DateTime.Now) SendMessage(message.Chat.Id, 3);
-
-                User.Events.Add(new Events(
-                    Time,
-                    message.Text.Replace(Time.ToString("HH:mm dd.MM.yyyy") + "\n", "")));
             }
         }
 
@@ -183,15 +214,18 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                 var userId = query.Message.Chat.Id;
                 var eventId = query.Data;
 
-                var User = Users.Find(x => x.IdUser == userId);
-
-                if (User != null)
+                using (var db = new Classes.Common.Connect())
                 {
-                    var eventToRemove = User.Events.Find(e => e.Id == eventId);
-                    if (eventToRemove != null)
+                    var User = db.Users.First(x => x.IdUser == userId);
+
+                    if (User != null)
                     {
-                        User.Events.Remove(eventToRemove);
-                        await telegramBotClient.SendMessage(userId, "Событие удалено.");
+                        var eventToRemove = User.Events.Find(e => e.Id == eventId);
+                        if (eventToRemove != null)
+                        {
+                            User.Events.Remove(eventToRemove);
+                            await telegramBotClient.SendMessage(userId, "Событие удалено.");
+                        }
                     }
                 }
             }
@@ -208,19 +242,35 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
         public async void Tick(object obj)
         {
-            string TimeNow = DateTime.Now.ToString("HH:mm dd.MM.yyyy");
-            foreach (Users User in Users)
+            var now = DateTime.Now;
+            var start = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0);
+            var end = start.AddMinutes(1);
+
+            using (var db = new Classes.Common.Connect())
             {
-                for (int i=0; i < User.Events.Count; i++)
+                var events = db.Events
+                    .Where(e => e.Time >= start && e.Time < end)
+                    .ToList();
+
+                foreach (var ev in events)
                 {
-                    if (User.Events[i].Time.ToString("HH:mm dd.MM.yyyy") != TimeNow) continue;
+                    try
+                    {
+                        await telegramBotClient.SendMessage(
+                            ev.User.IdUser,
+                            $"Напоминание: {ev.Message}"
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Ошибка отправки: {ex.Message}");
+                    }
 
-                    await telegramBotClient.SendMessage(
-                        User.IdUser,
-                        "Напоминание: " + User.Events[i].Message);
-
-                    User.Events.Remove(User.Events[i]);
+                    db.Events.Remove(ev);
                 }
+
+                if (events.Any())
+                    db.SaveChanges();
             }
         }
     }
