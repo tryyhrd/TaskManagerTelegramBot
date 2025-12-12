@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using System.Net.Security;
 using TaskManagerTelegramBot_Ozhgibesov.Classes;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
@@ -57,7 +55,8 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             "",
             "Задачи пользователя не найдены.",
             "Событие удалено.",
-            "Все события удалены."
+            "Все события удалены.",
+            "Событие добавлено."
         };
 
         public bool CheckFormatDateTime(string value, out DateTime time)
@@ -128,7 +127,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             }
         }
 
-        private void GetMessages(Message message)
+        private async void GetMessages(Message message)
         {
             Console.WriteLine("Получено сообщение: " + message.Text + " от пользователя: " + message.Chat.Username);
 
@@ -145,7 +144,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                 {
                     User = db.Users.FirstOrDefault(x => x.IdUser == IdUser);
 
-                    if (User == null) SendMessage(message.Chat.Id, 4);
+                    if (User == null) SendMessage(message.Chat.Id, 3);
                     else if (User.Events.Count == 0) SendMessage(User.IdUser, 3);
                     else
                     {
@@ -195,7 +194,12 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                     var newEvent = new Events(time, message.Text.Replace("HH:mm dd.MM.yyyy" + "\n", ""));
                     user.Events.Add(newEvent);
 
-                    db.SaveChanges(); 
+                    db.SaveChanges();
+
+                    await telegramBotClient.SendMessage(
+                            chatId: IdUser,
+                            text: $"Задача добавлена!"
+                                );
                 }
             }
         }
@@ -216,15 +220,23 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
                 using (var db = new Classes.Common.Connect())
                 {
-                    var User = db.Users.First(x => x.IdUser == userId);
+                    var User = db.Users.Include(u => u.Events).First(x => x.IdUser == userId);
 
                     if (User != null)
                     {
-                        var eventToRemove = User.Events.Find(e => e.Id == eventId);
+                        var eventToRemove = User.Events.FirstOrDefault(e => e.Id == eventId);
+
                         if (eventToRemove != null)
                         {
-                            User.Events.Remove(eventToRemove);
-                            await telegramBotClient.SendMessage(userId, "Событие удалено.");
+                            db.Events.Remove(eventToRemove);
+                            await db.SaveChangesAsync();
+
+                            await telegramBotClient.AnswerCallbackQuery(
+                                    callbackQueryId: query.Id,
+                                    text: "Событие удалено."
+                                    );
+
+                            await telegramBotClient.DeleteMessage(query.Message.Chat.Id, query.Message.Id, cancellationToken);
                         }
                     }
                 }

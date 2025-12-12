@@ -9,13 +9,21 @@ namespace TaskManagerTelegramBot_Ozhgibesov.Classes.Common
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
+            //optionsBuilder.UseSqlServer(
+            //    "Server=10.0.201.112;" +
+            //    "Database=base1_ISP_22_4_12;" +
+            //    "Integrated Security=false;" +
+            //    "User=ISP_22_4_12;" +
+            //    "Pwd=7m4tIyDMeybp_;" +
+            //    "MultipleActiveResultSets=true;");
             optionsBuilder.UseSqlServer(
-                "Server=10.0.201.112;" +
-                "Database=base1_ISP_22_4_12;" +
-                "Integrated Security=false;" +
-                "User=ISP_22_4_12;" +
-                "Pwd=7m4tIyDMeybp_;" +
+                "Server=DESKTOP-E07VVT6\\SQLEXPRESS;" +
+                "Database=TaskManager;" +
+                "Integrated Security=true;" +
+                "User=;" +
+                "Pwd=" +
                 "MultipleActiveResultSets=true;");
+            
         }
     }
 }
