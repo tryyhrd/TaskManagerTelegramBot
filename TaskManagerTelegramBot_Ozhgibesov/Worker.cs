@@ -143,10 +143,10 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             {
                 using (var db = new Classes.Common.Connect())
                 {
-                    User = await db.Users.FirstOrDefaultAsync(x => x.IdUser == IdUser);
+                    User = await db.Users.Include(u => u.Events).FirstOrDefaultAsync(x => x.IdUser == IdUser);
 
                     if (User == null) SendMessage(message.Chat.Id, 3);
-                    else if (User.Events.Count == 0) SendMessage(User.IdUser, 3);
+                    else if (User.Events?.Count == 0 || User.Events == null) SendMessage(User.IdUser, 3);
                     else
                     {
                         var userInDb = db.Users.Include(u => u.Events).First(u => u.IdUser == IdUser);
@@ -244,10 +244,20 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
                     if (time < DateTime.Now) SendMessage(message.Chat.Id, 3);
 
+                    var Event = new Events
+                    {
+                        Message = message.Text.Replace("HH:mm dd.MM.yyyy" + "\n", ""),
+                        Time = time,
+                        IsRecurring = false,
+                        RecurringDays = null,
+                        RecurringTimeStr = null,
+                        UserId = IdUser
+                    };
+
                     var newEvent = new Events(time, message.Text.Replace("HH:mm dd.MM.yyyy" + "\n", ""));
                     user.Events.Add(newEvent);
 
-                    db.SaveChanges();
+                    await db.SaveChangesAsync();
 
                     await telegramBotClient.SendMessage(
                             chatId: IdUser,

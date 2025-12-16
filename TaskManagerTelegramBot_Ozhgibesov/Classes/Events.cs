@@ -9,16 +9,9 @@ namespace TaskManagerTelegramBot_Ozhgibesov.Classes
         public string Message { get; set; }
         public bool IsRecurring {  get; set; }
 
-        //private string _recurringDaysStr;
-
-        public List<DayOfWeek> RecurringDays { get; set; }  
+        public List<DayOfWeek>? RecurringDays { get; set; }
         
-        //public string RecurringDaysStr
-        //{
-        //    get => _recurringDaysStr;
-        //    set => _recurringDaysStr = value;
-        //}
-        public string RecurringTimeStr { get; set; } = "00:00";
+        public string? RecurringTimeStr { get; set; } = "00:00";
 
         [NotMapped]
         public TimeSpan RecurringTime
