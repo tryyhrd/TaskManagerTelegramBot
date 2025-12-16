@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 using TaskManagerTelegramBot_Ozhgibesov.Classes;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
@@ -14,7 +15,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
         TelegramBotClient telegramBotClient;
 
-        ILogger<Worker> _logger;
+        readonly ILogger<Worker> _logger;
 
         Timer Timer;
 
@@ -59,7 +60,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             "Событие добавлено."
         };
 
-        public bool CheckFormatDateTime(string value, out DateTime time)
+        public static bool CheckFormatDateTime(string value, out DateTime time)
         {
             return DateTime.TryParse(value, out time);
         }
@@ -105,9 +106,9 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             {
                 using (var db = new Classes.Common.Connect())
                 {
-                    Users User = db.Users
+                    Users User = await db.Users
                             .Include(u => u.Events)
-                            .FirstOrDefault(x => x.IdUser == chatId);
+                            .FirstOrDefaultAsync(x => x.IdUser == chatId);
 
                     if (User == null) SendMessage(chatId, 3);
                     else if (User.Events.Count == 0) SendMessage(chatId, 3);
@@ -127,7 +128,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             }
         }
 
-        private async void GetMessages(Message message)
+        private async Task GetMessages(Message message)
         {
             Console.WriteLine("Получено сообщение: " + message.Text + " от пользователя: " + message.Chat.Username);
 
@@ -136,13 +137,13 @@ namespace TaskManagerTelegramBot_Ozhgibesov
 
             Users User = null;
 
-            if (message.Text.Contains("/")) Command(message.Chat.Id, message.Text);
+            if (MessageUser.Contains("/")) Command(message.Chat.Id, MessageUser);
 
             else if (message.Text.Equals("Удалить все задачи"))
             {
                 using (var db = new Classes.Common.Connect())
                 {
-                    User = db.Users.FirstOrDefault(x => x.IdUser == IdUser);
+                    User = await db.Users.FirstOrDefaultAsync(x => x.IdUser == IdUser);
 
                     if (User == null) SendMessage(message.Chat.Id, 3);
                     else if (User.Events.Count == 0) SendMessage(User.IdUser, 3);
@@ -171,8 +172,60 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                     {
                         user = new Users(IdUser);
                         db.Users.Add(user);
+                        await db.SaveChangesAsync();
                     }
 
+                    string text = message.Text.Trim();
+
+                    if (text.StartsWith("каждую", StringComparison.OrdinalIgnoreCase) ||
+                        text.StartsWith("каждый", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var lines = message.Text.Split('\n', 2);
+                        if (lines.Length < 2) return;
+
+                        var scheduleLine = lines[0];
+                        var taskMessage = lines[1];
+
+                        var days = new List<DayOfWeek>();
+                        if (scheduleLine.Contains("понедельник")) days.Add(DayOfWeek.Monday);
+                        if (scheduleLine.Contains("вторник")) days.Add(DayOfWeek.Tuesday);
+                        if (scheduleLine.Contains("среду") || scheduleLine.Contains("среда")) days.Add(DayOfWeek.Wednesday);
+                        if (scheduleLine.Contains("четверг")) days.Add(DayOfWeek.Thursday);
+                        if (scheduleLine.Contains("пятницу")) days.Add(DayOfWeek.Friday);
+                        if (scheduleLine.Contains("субботу")) days.Add(DayOfWeek.Saturday);
+                        if (scheduleLine.Contains("воскресенье") || scheduleLine.Contains("воскресенья")) days.Add(DayOfWeek.Sunday);
+
+                        var timeMatch = Regex.Match(scheduleLine, @"(\d{1,2}):(\d{2})");
+                        if (!timeMatch.Success || days.Count == 0)
+                        {
+                            await telegramBotClient.SendMessage(IdUser, "Не удалось распознать расписание.");
+                            return;
+                        }
+
+                        var hour = int.Parse(timeMatch.Groups[1].Value);
+                        var minute = int.Parse(timeMatch.Groups[2].Value);
+                        var recurringTime = new TimeSpan(hour, minute, 0);
+
+                        var now = DateTime.Now;
+                        var nextTrigger = CalculateNextRecurrence(now, days, recurringTime);
+
+                        var recurringEvent = new Events
+                        {
+                            Message = taskMessage,
+                            Time = nextTrigger,
+                            IsRecurring = true,
+                            RecurringDays = days,
+                            RecurringTimeStr = $"{hour:D2}:{minute:D2}",
+                            UserId = IdUser
+                        };
+
+                        user.Events.Add(recurringEvent);
+                        await db.SaveChangesAsync();
+
+                        await telegramBotClient.SendMessage(IdUser, $"Повторяющаяся задача добавлена!\nСледующее напоминание: {nextTrigger:dd.MM.yyyy HH:mm}");
+                        return;
+                    }
+                    
                     string[] info = message.Text.Split('\n');
 
                     if (info.Length < 2)
@@ -204,13 +257,26 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             }
         }
 
+        private DateTime CalculateNextRecurrence(DateTime from, List<DayOfWeek> days, TimeSpan time)
+        {
+            var current = from.Date.Add(time);
+            if (current <= from)
+                current = current.AddDays(1);
+
+            while (!days.Contains(current.DayOfWeek))
+            {
+                current = current.AddDays(1);
+            }
+            return current;
+        }
+
         private async Task HandleUpdateAsync(
             ITelegramBotClient client,
             Update update,
             CancellationToken cancellationToken)
         {
             if (update.Type == UpdateType.Message)
-                GetMessages(update.Message);
+                await GetMessages(update.Message);
 
             else if (update.Type == UpdateType.CallbackQuery)
             {
@@ -261,6 +327,7 @@ namespace TaskManagerTelegramBot_Ozhgibesov
             using (var db = new Classes.Common.Connect())
             {
                 var events = db.Events
+                    .Include(e => e.User) 
                     .Where(e => e.Time >= start && e.Time < end)
                     .ToList();
 
@@ -278,11 +345,24 @@ namespace TaskManagerTelegramBot_Ozhgibesov
                         Console.WriteLine($"Ошибка отправки: {ex.Message}");
                     }
 
-                    db.Events.Remove(ev);
+                    if (ev.IsRecurring)
+                    {
+                        var timeParts = ev.RecurringTimeStr.Split(':');
+                        var recurringTime = new TimeSpan(
+                            int.Parse(timeParts[0]),
+                            int.Parse(timeParts[1]),
+                            0
+                        );
+                        ev.Time = CalculateNextRecurrence(DateTime.Now, ev.RecurringDays, recurringTime);
+                    }
+                    else
+                    {
+                        db.Events.Remove(ev);
+                    }
                 }
 
                 if (events.Any())
-                    db.SaveChanges();
+                    await db.SaveChangesAsync();
             }
         }
     }

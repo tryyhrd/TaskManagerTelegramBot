@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace TaskManagerTelegramBot_Ozhgibesov.Classes.Common
 {
@@ -23,7 +24,26 @@ namespace TaskManagerTelegramBot_Ozhgibesov.Classes.Common
                 "User=;" +
                 "Pwd=" +
                 "MultipleActiveResultSets=true;");
-            
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Users>()
+                        .HasKey(u => u.Id);
+
+            modelBuilder.Entity<Events>()
+                        .Property(e => e.RecurringDays)
+                        .HasConversion(
+                        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                        v => JsonSerializer.Deserialize<List<DayOfWeek>>(v, (JsonSerializerOptions?)null)
+                        ?? new List<DayOfWeek>()
+        );
+
+            modelBuilder.Entity<Events>()
+                .HasOne(e => e.User)
+                .WithMany(u => u.Events)
+                .HasForeignKey(e => e.UserId)
+                .HasPrincipalKey(u => u.IdUser);
         }
     }
 }

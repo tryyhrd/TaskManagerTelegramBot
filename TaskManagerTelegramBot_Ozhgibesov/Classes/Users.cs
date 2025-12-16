@@ -5,6 +5,7 @@
         public int Id { get; set; }
         public long IdUser { get; set; }
         public List<Events> Events { get; set; }
+        public Users() { }
         public Users(long idUser)
         {
             IdUser = idUser;
